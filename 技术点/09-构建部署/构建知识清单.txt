@@ -1,0 +1,671 @@
+# Electron 构建知识体系清单
+
+> 目标：完整、深入、实战导向的 Electron 构建知识体系
+> 说明：Web 前端构建部分（Vite/Webpack）仅简要提及
+
+---
+
+## 1) 基础概念
+
+### 1.1 Electron 架构与进程模型
+- Main 进程
+  - Node.js 运行时环境
+  - 窗口管理（BrowserWindow 生命周期）
+  - 系统级 API 访问（文件系统、托盘、菜单、对话框）
+  - 应用生命周期管理（app 模块）
+- Renderer 进程
+  - Chromium 渲染引擎
+  - 每个窗口一个独立进程
+  - 默认受限的 Node.js 访问（安全考量）
+- Preload 脚本
+  - Main 与 Renderer 之间的安全桥梁
+  - contextBridge API 暴露
+  - 沙箱模式下的能力边界
+- IPC 通信机制
+  - ipcMain / ipcRenderer
+  - invoke/handle 模式（Promise 化）
+  - 单向 vs 双向通信
+  - 通信性能与数据序列化
+
+### 1.2 安全模型
+- 上下文隔离（contextIsolation）
+- 沙箱模式（sandbox）
+- nodeIntegration 的风险与使用场景
+- webSecurity 与 CSP 配置
+
+### 1.3 两类构建产物
+- 可运行目录（unpacked）
+  - 开发调试用途
+  - 目录结构解析
+  - app.asar 与 app.asar.unpacked
+- 分发包（installer）
+  - Windows: NSIS / MSI / Squirrel / portable
+  - macOS: DMG / PKG / ZIP
+  - Linux: AppImage / deb / rpm / snap / flatpak
+
+### 1.4 Electron 版本管理
+- Electron 与 Node.js / Chromium 版本对应关系
+- 版本升级的影响评估
+- LTS 策略与版本选择
+
+---
+
+## 2) 构建链路（从源码到安装包）
+
+### 2.1 前端构建（Renderer）- 简要
+- Vite/Webpack 输出配置要点
+- base / publicPath 在 Electron 中的特殊处理（file:// 协议）
+- 资源路径解析策略
+- 开发环境（http://localhost）vs 生产环境（file://）
+
+### 2.2 主进程构建（Main/Preload）
+- TypeScript 编译
+  - tsc / esbuild / swc 选择
+  - tsconfig 配置要点（target、module、moduleResolution）
+- 目标环境配置
+  - Node 环境而非浏览器
+  - external 依赖处理
+  - __dirname / __filename 处理
+- 多入口构建
+  - main.js
+  - preload.js（可能多个）
+  - worker 脚本
+- Source Map 策略
+  - 生产环境是否保留
+  - 错误上报与 sourcemap
+
+### 2.3 打包阶段（Packaging）
+- Electron runtime 打包
+  - Electron 二进制文件
+  - 应用代码合并
+- asar 归档
+  - 工作原理
+  - 优缺点分析
+  - asarUnpack 场景
+- native modules 重编译
+  - electron-rebuild
+  - prebuild / prebuild-install
+  - node-gyp 环境要求
+  - ABI 版本匹配
+
+### 2.4 制作安装包（Making Installer）
+- 各平台安装包格式对比
+- 安装包定制化
+- 安装/卸载行为控制
+
+### 2.5 签名与公证
+- 为什么必须签名
+- Windows Code Signing
+  - 证书类型（EV / OV / 自签名）
+  - 时间戳服务
+  - SmartScreen 信誉
+- macOS Codesign + Notarization
+  - Developer ID 证书
+  - hardened runtime
+  - notarytool / altool
+  - stapling
+- 签名对自动更新的影响
+
+### 2.6 更新分发
+- electron-updater 机制
+- 发布渠道配置（generic / GitHub / S3 / 私有服务器）
+- latest.yml / latest-mac.yml 解析
+
+---
+
+## 3) package.json scripts 组织
+
+### 3.1 标准脚本命名
+- dev / start：开发模式启动
+- build:renderer：构建前端资源
+- build:main / build:preload：构建主进程代码
+- build：完整构建（renderer + main）
+- pack：生成可运行目录（不出安装包）
+- dist：生成安装包
+- publish：打包并发布（CI 专用）
+- clean：清理构建产物
+- rebuild：重编译 native modules
+- lint / typecheck：代码检查
+
+### 3.2 构建脚本（scripts/build.js）设计
+- 环境变量管理
+  - NODE_ENV（production/staging/development）
+  - 渠道标识（channel）
+  - API 地址、Sentry DSN 等运行时配置
+- 版本号管理
+  - 从 package.json 读取
+  - 构建号（buildNumber）自动递增
+  - 渠道号注入
+- 条件构建
+  - 是否签名
+  - 是否 publish
+  - 目标平台/架构
+
+### 3.3 跨平台脚本兼容
+- cross-env 使用
+- npm vs pnpm vs yarn 差异
+- 脚本串联与并行执行
+
+---
+
+## 4) electron-builder 深入
+
+### 4.1 配置文件格式与位置
+- package.json 内嵌 build 字段
+- electron-builder.yml / .json / .js
+- 配置继承（extends）
+- 多配置文件策略（不同渠道/环境）
+
+### 4.2 核心配置项详解
+- appId：应用唯一标识（影响用户数据路径、协议注册）
+- productName：显示名称
+- files：打包包含/排除规则（glob 语法）
+- extraFiles：复制到安装目录根目录
+- extraResources：复制到 resources 目录
+- asar / asarUnpack：归档配置
+- directories：
+  - output：输出目录
+  - buildResources：构建资源目录（图标等）
+  - app：应用源码目录
+- artifactName：产物命名模板（${productName}-${version}-${arch}.${ext}）
+- compression：压缩级别（store/normal/maximum）
+- npmRebuild：是否自动 rebuild
+
+### 4.3 publish 配置
+- provider 类型：
+  - generic（HTTP 服务器）
+  - github（GitHub Releases）
+  - s3 / spaces / gcs（对象存储）
+  - custom
+- 多渠道发布配置
+- private 仓库认证
+
+### 4.4 钩子函数
+- beforeBuild：构建前
+- afterPack：打包后（安装包生成前）
+- afterSign：签名后
+- afterAllArtifactBuild：所有产物生成后
+- 钩子应用场景：
+  - 注入额外文件
+  - 修改产物
+  - 通知 / 上传
+
+### 4.5 构建缓存与优化
+- electron-builder 缓存目录
+- node_modules 缓存
+- Electron 二进制缓存
+- 增量构建策略
+
+---
+
+## 5) Windows 打包重点（NSIS）
+
+### 5.1 NSIS 配置项全解
+- oneClick：一键安装 vs 向导式安装
+- allowElevation：是否允许提升权限
+- allowToChangeInstallationDirectory：是否允许选择安装目录
+- perMachine：系统级安装 vs 用户级安装
+- createDesktopShortcut / createStartMenuShortcut
+- runAfterFinish：安装完成后启动
+- deleteAppDataOnUninstall：卸载时清理用户数据
+- installerIcon / uninstallerIcon：安装/卸载图标
+- installerHeader / installerHeaderIcon：安装向导头部
+- installerSidebar / uninstallerSidebar：侧边栏图片
+- license：许可协议文件
+- language：安装语言
+- unicode：是否使用 Unicode NSIS
+
+### 5.2 installer.nsh 自定义脚本
+- NSIS 脚本基础语法
+- 常用宏与函数
+- 自定义页面
+- 安装前检查：
+  - 检测是否已运行（互斥锁）
+  - 检测旧版本并提示卸载
+  - 系统要求检查
+- 安装过程控制：
+  - 杀死正在运行的进程
+  - 备份/迁移用户配置
+  - 清理旧版本残留
+- 注册表操作
+- 环境变量设置
+- 文件关联注册
+- 协议（URL Scheme）注册
+- 安装驱动/证书（高级场景）
+- 卸载钩子
+
+### 5.3 win 平台配置
+- target 类型：
+  - nsis：标准安装包
+  - nsis-web：在线安装包
+  - portable：绿色版
+  - appx：Windows Store
+  - msi：企业部署
+  - squirrel：自动更新框架
+- icon：应用图标
+- requestedExecutionLevel：
+  - asInvoker：普通权限
+  - requireAdministrator：管理员权限
+  - highestAvailable：最高可用权限
+- publisherName：发布者名称
+- legalTrademarks：法律商标
+- fileAssociations：文件关联
+- protocols：协议注册
+
+### 5.4 单实例控制
+- app.requestSingleInstanceLock()
+- 配合 NSIS 安装检测
+- 多实例场景处理
+
+### 5.5 Windows 特殊问题
+- 长路径问题（MAX_PATH 260 限制）
+- 中文路径问题
+- 杀毒软件误报处理
+- Windows Defender SmartScreen
+- UAC 提示处理
+
+---
+
+## 6) macOS 构建重点
+
+### 6.1 基础配置
+- mac.category：应用分类
+- mac.icon：icns 格式图标
+- mac.darkModeSupport：深色模式支持
+- mac.minimumSystemVersion：最低系统版本
+- mac.type：应用类型（distribution/development）
+
+### 6.2 DMG 配置
+- dmg.background：背景图片
+- dmg.icon：DMG 卷图标
+- dmg.iconSize：图标大小
+- dmg.contents：图标布局
+- dmg.window：窗口大小和位置
+- dmg.format：格式（UDBZ/UDZO/ULFO）
+
+### 6.3 代码签名
+- 证书类型：
+  - Developer ID Application（分发）
+  - Mac Developer（开发）
+  - 3rd Party Mac Developer Application（MAS）
+- identity 配置
+- entitlements.plist：
+  - com.apple.security.cs.allow-unsigned-executable-memory
+  - com.apple.security.cs.allow-jit
+  - com.apple.security.cs.disable-library-validation
+  - 其他权限声明
+- hardened runtime 要求
+- 签名验证命令
+
+### 6.4 公证（Notarization）
+- 为什么必须公证（macOS 10.15+）
+- notarytool 使用
+- 公证流程：
+  - 上传应用
+  - 等待审核
+  - stapling（订装）
+- 公证失败排查
+- afterSign 钩子自动化公证
+
+### 6.5 Universal Binary（Apple Silicon）
+- x64 / arm64 / universal 架构
+- 构建策略选择
+- 架构特定依赖处理
+- 性能对比
+
+### 6.6 Mac App Store（MAS）
+- 沙盒要求
+- entitlements 差异
+- pkg 格式
+- 审核注意事项
+
+---
+
+## 7) Linux 构建重点
+
+### 7.1 目标格式
+- AppImage：
+  - 便携式分发
+  - 无需 root 权限
+  - FUSE 依赖
+- deb（Debian/Ubuntu）：
+  - 包结构
+  - 依赖声明
+  - postinst/prerm 脚本
+- rpm（Fedora/RHEL）：
+  - spec 文件
+  - 依赖处理
+- snap：
+  - confinement 模式
+  - snapcraft.yaml
+- flatpak：
+  - sandbox 模式
+  - manifest 配置
+
+### 7.2 桌面集成
+- .desktop 文件配置
+- 图标安装（多尺寸）
+- MIME 类型注册
+- 文件关联
+- 应用菜单分类
+
+### 7.3 常见问题
+- glibc 版本兼容
+- libstdc++ 兼容
+- 图形库依赖（libgtk、libnotify 等）
+- sandbox 权限问题
+- AppArmor/SELinux 配置
+
+---
+
+## 8) Native Modules 详解
+
+### 8.1 什么是 Native Modules
+- C/C++ 扩展模块
+- N-API 与 NAN
+- 常见 native 模块：sqlite3、sharp、keytar、ffi-napi 等
+
+### 8.2 为什么需要 rebuild
+- Node ABI 版本
+- Electron 内置的 Node 版本差异
+- 跨平台二进制不兼容
+
+### 8.3 重编译方案
+- electron-rebuild
+  - 使用方法
+  - 常用参数
+  - postinstall 集成
+- @electron/rebuild（新版）
+- electron-builder 内置 rebuild
+- prebuild-install 机制
+  - 预编译二进制下载
+  - 回退到本地编译
+
+### 8.4 node-gyp 环境配置
+- Windows：
+  - Visual Studio Build Tools
+  - windows-build-tools
+  - Python 版本要求
+- macOS：
+  - Xcode Command Line Tools
+- Linux：
+  - build-essential
+  - python、make、g++
+
+### 8.5 asarUnpack 策略
+- 哪些模块需要 unpack
+- 配置语法
+- 对应用体积的影响
+
+### 8.6 常见问题排查
+- MODULE_NOT_FOUND
+- 版本不匹配错误
+- 编译失败排查
+- 运行时加载失败
+
+---
+
+## 9) 安全与资源打包策略
+
+### 9.1 asar 深入理解
+- asar 格式原理
+- 优点：
+  - 路径长度问题规避（Windows）
+  - 一定程度防止简单篡改
+  - 文件组织更整洁
+- 缺点/限制：
+  - 不能包含 native 模块
+  - 动态加载文件需特殊处理
+  - 不是真正的加密/保护
+- asarUnpack 详解
+
+### 9.2 资源路径处理
+- app.getAppPath()
+- app.getPath('userData')
+- process.resourcesPath
+- __dirname 在打包后的行为
+- 开发/生产环境统一处理方案
+
+### 9.3 Preload 安全最佳实践
+- contextIsolation: true
+- nodeIntegration: false
+- sandbox: true
+- contextBridge 正确使用
+- 最小权限原则
+
+### 9.4 代码保护（可选）
+- 代码混淆方案
+- asar 加密方案（第三方）
+- 字节码编译（bytenode）
+- 局限性说明
+
+### 9.5 敏感信息处理
+- 不要硬编码密钥
+- 环境变量注入
+- 加密存储方案
+
+---
+
+## 10) 自动更新
+
+### 10.1 electron-updater 机制
+- 与 electron-builder 配套
+- 更新检查流程
+- 下载与安装流程
+- API 使用
+
+### 10.2 更新服务器配置
+- generic 服务器
+  - 文件结构要求
+  - latest.yml 格式
+- GitHub Releases
+- S3/OSS 配置
+- 私有服务器搭建
+
+### 10.3 更新策略
+- 全量更新 vs 增量更新（差分）
+  - blockmap 机制
+  - 节省带宽
+- 强制更新 vs 可选更新
+- 静默更新 vs 用户确认
+- 灰度发布
+  - staged rollout
+  - 按比例推送
+
+### 10.4 Windows 更新特殊处理
+- NSIS 安装包更新流程
+- 绿色版更新差异
+- 权限问题处理
+- 正在运行时的更新处理
+
+### 10.5 macOS 更新特殊处理
+- 签名校验
+- DMG vs ZIP
+- Apple Silicon 兼容
+
+### 10.6 更新 UI 最佳实践
+- 进度显示
+- 错误处理
+- 回滚机制
+- 更新日志展示
+
+### 10.7 版本管理
+- Semver 语义化版本
+- prerelease 版本（alpha/beta/rc）
+- 版本比较逻辑
+
+---
+
+## 11) CI/CD 实践
+
+### 11.1 多平台构建矩阵
+- GitHub Actions 配置
+- 平台 runner 选择：
+  - windows-latest
+  - macos-latest（Intel）
+  - macos-14（Apple Silicon）
+  - ubuntu-latest
+- 矩阵策略配置
+
+### 11.2 构建环境准备
+- Node.js 版本锁定
+- 包管理器选择（npm/pnpm/yarn）
+- 依赖缓存配置
+- Electron 缓存配置
+
+### 11.3 签名密钥管理
+- GitHub Secrets 配置
+- Windows 证书处理
+  - Base64 编码存储
+  - 构建时解码
+- macOS 证书处理
+  - Keychain 操作
+  - p12 证书导入
+- Apple ID 认证
+  - App-specific password
+  - notarytool 认证
+
+### 11.4 环境变量注入
+- 构建时注入 vs 运行时读取
+- 渠道配置
+- API 地址
+- 功能开关
+- Sentry/Analytics DSN
+
+### 11.5 产物管理
+- artifact 上传
+- Release 创建
+- S3/OSS 上传
+- 下载站发布
+- CDN 刷新
+
+### 11.6 构建优化
+- 增量构建
+- 并行构建
+- 缓存策略
+- 构建时间优化
+
+### 11.7 可重复构建
+- lockfile 锁定
+- Node 版本锁定
+- Electron 版本锁定
+- 依赖 hash 校验
+
+---
+
+## 12) 调试与问题排查
+
+### 12.1 构建问题诊断
+- electron-builder 日志级别
+- DEBUG 环境变量
+- 常见错误码解析
+
+### 12.2 打包产物检查
+- 目录结构验证
+- asar 内容查看
+- 文件完整性检查
+- 资源路径验证
+
+### 12.3 安装包测试
+- NSIS 日志模式
+- macOS installer 日志
+- 安装/卸载流程验证
+- 升级流程验证
+
+### 12.4 常见问题清单
+- 白屏问题排查
+- 原生模块加载失败
+- 资源文件找不到
+- 签名验证失败
+- 更新失败
+- 权限问题
+
+---
+
+## 13) 性能优化
+
+### 13.1 打包体积优化
+- 依赖瘦身（production only）
+- 排除不必要文件
+- node_modules 清理
+- 多架构选择
+- 压缩配置
+
+### 13.2 构建速度优化
+- 并行构建
+- 缓存利用
+- 增量构建
+- CI 优化
+
+### 13.3 启动性能
+- 懒加载策略
+- 预加载优化
+- 首屏渲染优化
+
+---
+
+## 14) 多渠道/多环境管理
+
+### 14.1 渠道概念
+- 官网渠道
+- 应用商店渠道
+- 企业定制渠道
+
+### 14.2 配置管理
+- 多配置文件
+- 环境变量区分
+- 条件编译
+
+### 14.3 版本区分
+- 渠道标识注入
+- 版本号规则
+- 更新源区分
+
+---
+
+## 15) 项目结构最佳实践
+
+### 15.1 目录结构
+- src/main：主进程代码
+- src/renderer：渲染进程代码
+- src/preload：preload 脚本
+- src/shared：共享代码
+- resources：静态资源
+- scripts：构建脚本
+- config：配置文件
+
+### 15.2 配置文件组织
+- electron-builder 配置
+- TypeScript 配置
+- 环境配置
+- 构建脚本
+
+---
+
+## 知识模块划分（后续逐步完成）
+
+1. 【基础篇】Electron 架构与进程模型 ★★★
+2. 【基础篇】构建产物与安装包格式 ★★
+3. 【链路篇】主进程构建配置 ★★★
+4. 【链路篇】打包与 asar 机制 ★★★
+5. 【工具篇】electron-builder 配置大全 ★★★★★
+6. 【平台篇】Windows/NSIS 深度定制 ★★★★★
+7. 【平台篇】macOS 签名与公证 ★★★★
+8. 【平台篇】Linux 构建与分发 ★★
+9. 【进阶篇】Native Modules 完全指南 ★★★★
+10. 【进阶篇】自动更新实现 ★★★
+11. 【工程篇】CI/CD 完整配置 ★★★★
+12. 【工程篇】调试与问题排查 ★★★
+13. 【优化篇】体积与性能优化 ★★
+14. 【安全篇】安全配置与代码保护 ★★
+
+（★ 数量表示在实际工作中的重要程度和使用频率）
+
+---
+
+## 参考资源
+
+- Electron 官方文档：https://www.electronjs.org/docs
+- electron-builder 文档：https://www.electron.build/
+- NSIS 文档：https://nsis.sourceforge.io/Docs/
+- Apple Developer 文档：https://developer.apple.com/documentation/

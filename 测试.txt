@@ -1,0 +1,64 @@
+# 1. 查看操作系统信息
+systeminfo | Select-String "OS"
+
+# 2. 查看当前用户
+whoami
+
+# 3. 查看当前目录
+pwd
+
+# 4. 查看 IP 地址
+ipconfig | Select-String "IPv4"
+
+# 5. 查看 Node.js 版本
+node --version
+
+# 6. 查看 npm 源配置
+npm config get registry
+
+# 7. 创建一个测试文件
+echo "Hello from Windows via Mac Cursor! $(Get-Date)" > C:\Users\zhouming\Downloads\remote-test.txt
+
+# 8. 读取测试文件
+Get-Content C:\Users\zhouming\Downloads\remote-test.txt
+
+
+
+
+
+
+
+
+
+
+
+
+
+方案 3：使用计算机名（同一局域网）
+如果两台电脑在同一局域网，可以用计算机名代替 IP：
+# 在 Windows 上查看计算机名hostname
+然后 Mac 上连接：
+ssh sshuser@L10004481.local# 或
+
+
+
+
+
+
+
+
+
+
+
+# 方法 A: 直接下载安装包
+# 访问 https://tailscale.com/download/windows
+# 下载并安装 .exe 文件
+
+# 方法 B: 使用 winget（如果可用）
+winget install Tailscale.Tailscale
+
+# 命令行查看
+tailscale ip
+
+# 或者在系统托盘右键 Tailscale → 查看 IP
+# 输出类似: 100.64.0.1（这个 IP 永远不变！）

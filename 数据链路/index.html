@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Galaxy Client 数据链路分析 — 微信4.0</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-left">
+      <h1 class="header-title">Galaxy Client 数据链路分析</h1>
+      <span class="badge badge-version">微信 4.0</span>
+      <span class="badge badge-note">仅个人微信</span>
+    </div>
+    <div class="header-right">
+      <div class="platform-toggle" id="platform-toggle">
+        <button class="platform-btn active" data-platform="wx">微信</button>
+        <button class="platform-btn disabled" data-platform="wkwx" title="即将支持">企业微信</button>
+      </div>
+      <input type="text" id="search-input" class="search-input" placeholder="搜索场景、标签...">
+    </div>
+  </header>
+
+  <main class="main">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <button class="sidebar-item active" data-id="__overview__">
+          <span class="sidebar-icon">🏠</span>
+          <span class="sidebar-text">架构总览</span>
+        </button>
+        <button class="sidebar-item" data-id="__sls__">
+          <span class="sidebar-icon">🔍</span>
+          <span class="sidebar-text">日志查询指南</span>
+        </button>
+      </div>
+      <div id="sidebar-categories"></div>
+    </aside>
+
+    <section class="content" id="content">
+      <!-- JS 渲染 -->
+    </section>
+  </main>
+
+  <div class="detail-overlay" id="detail-overlay">
+    <div class="detail-panel" id="detail-panel">
+      <button class="detail-close" id="detail-close">&times;</button>
+      <div id="detail-content"></div>
+    </div>
+  </div>
+
+  <script src="mermaid.min.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
