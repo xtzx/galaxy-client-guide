@@ -10,6 +10,25 @@
   var nodeRegistry = [];
   var hashUpdating = false;
 
+  function getArchitecture() {
+    return currentPlatform === 'wkwx' ? DATA.wkwxArchitecture : DATA.architecture;
+  }
+  function getMeta() {
+    return currentPlatform === 'wkwx' ? (DATA.wkwxMeta || DATA.meta) : DATA.meta;
+  }
+  function getScenarios() {
+    return currentPlatform === 'wkwx' ? (DATA.wkwxScenarios || []) : DATA.scenarios;
+  }
+  function getCategories() {
+    return currentPlatform === 'wkwx' ? (DATA.wkwxCategories || DATA.categories) : DATA.categories;
+  }
+  function getMqttTaskCategories() {
+    return currentPlatform === 'wkwx' ? (DATA.wkwxMqttTaskCategories || []) : (DATA.mqttTaskCategories || []);
+  }
+  function getUpstreamCategories() {
+    return currentPlatform === 'wkwx' ? (DATA.wkwxUpstreamCategories || []) : [];
+  }
+
   // ================================================================
   //  初始化
   // ================================================================
@@ -61,9 +80,11 @@
   function renderSidebar() {
     var container = document.getElementById('sidebar-categories');
     var html = '';
+    var cats = getCategories();
+    var scenarios = getScenarios();
 
-    DATA.categories.forEach(function (cat) {
-      var items = DATA.scenarios.filter(function (s) { return s.category === cat.id; });
+    cats.forEach(function (cat) {
+      var items = scenarios.filter(function (s) { return s.category === cat.id; });
       html += '<div class="sidebar-category" data-category="' + cat.id + '">';
       html += '<div class="sidebar-category-title">' + cat.icon + ' ' + cat.name + '</div>';
       items.forEach(function (s) {
@@ -112,7 +133,9 @@
       document.querySelectorAll('.platform-btn').forEach(function (b) {
         b.classList.toggle('active', b.getAttribute('data-platform') === platform);
       });
-      selectView(currentView);
+      renderSidebar();
+      updateHeaderBadges();
+      selectView('__overview__');
     });
 
     window.addEventListener('hashchange', function () {
@@ -186,12 +209,16 @@
   function showOverview() {
     nodeRegistry = [];
     var content = document.getElementById('content');
-    var arch = DATA.architecture;
+    var arch = getArchitecture();
+    var meta = getMeta();
 
     var html = '';
     html += '<div class="overview-header">';
     html += '<h2>系统架构总览</h2>';
-    html += '<p>' + DATA.meta.note + '</p>';
+    html += '<p>' + meta.note + '</p>';
+    if (meta.dirNote) {
+      html += '<p class="overview-summary" style="font-size:12px;color:var(--text-muted)">' + escapeHtml(meta.dirNote) + '</p>';
+    }
     html += '<p class="overview-summary">' + escapeHtml(arch.summary) + '</p>';
     html += '</div>';
 
@@ -260,10 +287,14 @@
 
     html += '</div>'; // end link-body-layout
 
-    // 全宽区域：MQTT任务清单 / 说明注释
-    if (link.id === 'link_downstream') {
+    // 全宽区域：MQTT任务清单 / 上行处理器清单 / 说明注释
+    if (link.id === 'link_downstream' || link.id === 'wkwx_link_downstream') {
       html += renderMqttTaskCategories();
-    } else if (link.taskListNote) {
+    }
+    if (link.id === 'wkwx_link_upstream' || link.id === 'wkwx_link_front_push' || link.id === 'wkwx_link_http_upload') {
+      html += renderUpstreamCategories(link.id);
+    }
+    if (link.taskListNote) {
       html += '<div class="link-task-note">';
       html += '<span class="task-note-icon">ℹ</span>';
       html += '<span>' + escapeHtml(link.taskListNote) + '</span>';
@@ -303,18 +334,24 @@
   // ================================================================
 
   function renderMqttTaskCategories() {
-    var cats = DATA.mqttTaskCategories;
+    var cats = getMqttTaskCategories();
     if (!cats || cats.length === 0) return '';
 
+    var isWkwx = currentPlatform === 'wkwx';
     var html = '';
     html += '<div class="mqtt-task-section">';
     html += '<h3 class="mqtt-task-title">MQTT 任务类型清单</h3>';
     html += '<p class="mqtt-task-subtitle">云端下发的全部任务类型（共 ' + countAllTasks(cats) + ' 种），点击大类展开查看</p>';
     html += '<div class="mqtt-dir-note">';
-    html += '<strong>处理器目录说明：</strong>';
-    html += '<code>task-mqtt/wx/</code> — 个人微信处理器（16个，均已注册至 WxConvertServiceList）；';
-    html += '<code>task-mqtt/wkwx/</code> — 企业微信处理器（注册至 WkwxConvertServiceList，独立管理）；';
-    html += '<code>task-mqtt/</code> 根目录含 <code>mqttChangeRemarkWx4Service.js</code>，状态待确认（是否注册至 WxConvertServiceList 需进一步核查）。';
+    if (isWkwx) {
+      html += '<strong>处理器目录说明：</strong>';
+      html += '<code>task-mqtt/wkwx/</code> — 企业微信处理器（25个，注册至 WorkWxConvertServiceList，由 mqttClientBase.js runTask() 中 registry.workWx=true 分支遍历调用）';
+    } else {
+      html += '<strong>处理器目录说明：</strong>';
+      html += '<code>task-mqtt/wx/</code> — 个人微信处理器（16个，均已注册至 WxConvertServiceList）；';
+      html += '<code>task-mqtt/wkwx/</code> — 企业微信处理器（注册至 WorkWxConvertServiceList，独立管理）；';
+      html += '<code>task-mqtt/</code> 根目录含 <code>mqttChangeRemarkWx4Service.js</code>，状态待确认。';
+    }
     html += '</div>';
 
     cats.forEach(function (cat, ci) {
@@ -355,6 +392,72 @@
     return html;
   }
 
+  function renderUpstreamCategories(linkId) {
+    var allCats = getUpstreamCategories();
+    if (!allCats || allCats.length === 0) return '';
+
+    var filterMap = {
+      'wkwx_link_upstream': ['wkwx_common_service', 'wkwx_convert_service', 'wkwx_convert_response'],
+      'wkwx_link_front_push': ['wkwx_front_strategy'],
+      'wkwx_link_http_upload': ['wkwx_http_endpoints'],
+    };
+    var allowedIds = filterMap[linkId] || [];
+    var cats = allCats.filter(function (c) { return allowedIds.indexOf(c.id) !== -1; });
+    if (cats.length === 0) return '';
+
+    var titleMap = {
+      'wkwx_link_upstream': '上行消息处理器清单（WorkWxConvertServiceList）',
+      'wkwx_link_front_push': '企微前端推送策略清单（SendMsg2FrontStrategyList）',
+      'wkwx_link_http_upload': '企微 HTTP 上报端点清单',
+    };
+
+    var html = '';
+    html += '<div class="mqtt-task-section">';
+    html += '<h3 class="mqtt-task-title">' + (titleMap[linkId] || '处理器清单') + '</h3>';
+    html += '<p class="mqtt-task-subtitle">共 ' + countAllTasks(cats) + ' 个处理器，点击大类展开查看</p>';
+
+    cats.forEach(function (cat, ci) {
+      var catIdx = 'upstream-cat-' + linkId + '-' + ci;
+      html += '<div class="mqtt-cat" id="' + catIdx + '">';
+      html += '<div class="mqtt-cat-header" role="button" tabindex="0" onclick="APP.toggleUpstreamCat(\'' + catIdx + '\')">';
+      html += '<span class="mqtt-cat-toggle">▶</span>';
+      html += '<span class="mqtt-cat-name">' + escapeHtml(cat.name) + '</span>';
+      html += '<span class="mqtt-cat-range">' + escapeHtml(cat.typeRange) + '</span>';
+      html += '<span class="mqtt-cat-count">' + cat.items.length + ' 个</span>';
+      html += '</div>';
+
+      html += '<div class="mqtt-cat-body" style="display:none">';
+      html += '<table class="mqtt-task-table">';
+      html += '<thead><tr>';
+      html += '<th>Type / 触发条件</th><th>名称</th><th>处理器文件</th>';
+      html += '</tr></thead>';
+      html += '<tbody>';
+      cat.items.forEach(function (item) {
+        html += '<tr>';
+        html += '<td class="mqtt-type-code">' + escapeHtml(String(item.type)) + '</td>';
+        html += '<td>' + escapeHtml(item.name) + '</td>';
+        html += '<td class="mqtt-handler">' + escapeHtml(item.handler) + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      html += '</div>';
+      html += '</div>';
+    });
+
+    html += '</div>';
+    return html;
+  }
+
+  function toggleUpstreamCat(catId) {
+    var el = document.getElementById(catId);
+    if (!el) return;
+    var body = el.querySelector('.mqtt-cat-body');
+    var toggle = el.querySelector('.mqtt-cat-toggle');
+    var isOpen = body.style.display !== 'none';
+    body.style.display = isOpen ? 'none' : '';
+    toggle.textContent = isOpen ? '▶' : '▼';
+  }
+
   function countAllTasks(cats) {
     var n = 0;
     cats.forEach(function (c) { n += c.items.length; });
@@ -369,6 +472,18 @@
     var isOpen = body.style.display !== 'none';
     body.style.display = isOpen ? 'none' : '';
     toggle.textContent = isOpen ? '▶' : '▼';
+  }
+
+  function updateHeaderBadges() {
+    var versionBadge = document.querySelector('.badge-version');
+    var noteBadge = document.querySelector('.badge-note');
+    if (currentPlatform === 'wkwx') {
+      if (versionBadge) versionBadge.textContent = '企业微信';
+      if (noteBadge) noteBadge.textContent = '仅企业微信';
+    } else {
+      if (versionBadge) versionBadge.textContent = '微信 4.0';
+      if (noteBadge) noteBadge.textContent = '仅个人微信';
+    }
   }
 
   function renderLinkTypesLegend() {
@@ -454,7 +569,8 @@
   // ================================================================
 
   function showScenario(id) {
-    var scenario = DATA.scenarios.find(function (s) { return s.id === id; });
+    var scenarios = getScenarios();
+    var scenario = scenarios.find(function (s) { return s.id === id; });
     if (!scenario) return;
 
     nodeRegistry = [];
@@ -926,6 +1042,7 @@
     showNodeDetail: showNodeDetail,
     navigateTo: function (scenarioId) { selectView(scenarioId); },
     toggleMqttCat: toggleMqttCat,
+    toggleUpstreamCat: toggleUpstreamCat,
     copyText: copyText,
   };
 })();
