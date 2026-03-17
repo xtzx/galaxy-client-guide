@@ -30,6 +30,9 @@
 | 26 | [微信助手工单排查通用方法论](./26-微信助手工单排查通用方法论.md) | 🔧 消息失败专项排查路径+通用分层排查思路+海量日志分析策略 | 日志系统+SLS |
 | 27 | [好友群列表同步与群成员缓存链路分析](./27-好友群列表同步与群成员缓存链路分析.md) | 🔧 USERLIST→GET_USER_LIST 完整链路+场景隔离+踢私加好友失效根因 | `forwardTask.js` `wxUserListResponseMsgHandler.js` |
 | 28 | [新增群发页面搜索功能与数据流分析](./28-新增群发页面搜索功能与数据流分析.md) | 🔍 Drawer三栏结构+PinyinMatch名称搜索+前端过滤链+误匹配根因分析 | `sendSetting/` `broadCast/store/thunks.js` |
+| 34 | [微信MQTT聊天服务完整链路分析](./34-微信MQTT聊天服务完整链路分析.md) | 🔗 微信消息逐行解读+ClientTaskFactory构建+各消息类型处理+SLS日志速查+问题分析 | `task-mqtt/mqttChatService.js` `clientTaskFactory.js` |
+| 35 | [企业微信MQTT聊天服务完整链路分析](./35-企业微信MQTT聊天服务完整链路分析.md) | 🔗 企微12种消息类型详解+文本解析算法+语音amr/silk双路径+视频ffmpeg处理+Bug清单 | `task-mqtt/wkwx/mqttWorkWxChatService.js` |
+| 36 | [文件下载服务深度分析](./36-文件下载服务深度分析.md) | 🔗 缓存/并发锁/重试/完整性校验全链路+fileUtils视频处理+已知Bug优先级清单 | `core/utils/fileDownload.js` `core/utils/fileUtils.js` |
 
 ---
 
