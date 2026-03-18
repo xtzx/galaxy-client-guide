@@ -5,29 +5,9 @@
   'use strict';
 
   var currentView = '__overview__';
-  var currentPlatform = 'wx';
   var mermaidReady = false;
   var nodeRegistry = [];
   var hashUpdating = false;
-
-  function getArchitecture() {
-    return currentPlatform === 'wkwx' ? DATA.wkwxArchitecture : DATA.architecture;
-  }
-  function getMeta() {
-    return currentPlatform === 'wkwx' ? (DATA.wkwxMeta || DATA.meta) : DATA.meta;
-  }
-  function getScenarios() {
-    return currentPlatform === 'wkwx' ? (DATA.wkwxScenarios || []) : DATA.scenarios;
-  }
-  function getCategories() {
-    return currentPlatform === 'wkwx' ? (DATA.wkwxCategories || DATA.categories) : DATA.categories;
-  }
-  function getMqttTaskCategories() {
-    return currentPlatform === 'wkwx' ? (DATA.wkwxMqttTaskCategories || []) : (DATA.mqttTaskCategories || []);
-  }
-  function getUpstreamCategories() {
-    return currentPlatform === 'wkwx' ? (DATA.wkwxUpstreamCategories || []) : [];
-  }
 
   // ================================================================
   //  初始化
@@ -80,8 +60,8 @@
   function renderSidebar() {
     var container = document.getElementById('sidebar-categories');
     var html = '';
-    var cats = getCategories();
-    var scenarios = getScenarios();
+    var cats = DATA.categories;
+    var scenarios = DATA.scenarios;
 
     cats.forEach(function (cat) {
       var items = scenarios.filter(function (s) { return s.category === cat.id; });
@@ -120,22 +100,16 @@
       if (e.target === this) closeDetail();
     });
 
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') closeDetail();
+    document.getElementById('diagram-zoom-close').addEventListener('click', closeDiagramZoom);
+    document.getElementById('diagram-zoom-overlay').addEventListener('click', function (e) {
+      if (e.target === this) closeDiagramZoom();
     });
 
-    document.getElementById('platform-toggle').addEventListener('click', function (e) {
-      var btn = e.target.closest('.platform-btn');
-      if (!btn || btn.classList.contains('disabled')) return;
-      var platform = btn.getAttribute('data-platform');
-      if (platform === currentPlatform) return;
-      currentPlatform = platform;
-      document.querySelectorAll('.platform-btn').forEach(function (b) {
-        b.classList.toggle('active', b.getAttribute('data-platform') === platform);
-      });
-      renderSidebar();
-      updateHeaderBadges();
-      selectView('__overview__');
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        closeDetail();
+        closeDiagramZoom();
+      }
     });
 
     window.addEventListener('hashchange', function () {
@@ -206,11 +180,15 @@
   //  架构总览
   // ================================================================
 
+  var activeArchTab = 0;
+
   function showOverview() {
     nodeRegistry = [];
     var content = document.getElementById('content');
-    var arch = getArchitecture();
-    var meta = getMeta();
+    var arch = DATA.architecture;
+    var meta = DATA.meta;
+
+    var tabLabels = ['① 下行任务', '② 上行回报', '③ 前端指令'];
 
     var html = '';
     html += '<div class="overview-header">';
@@ -224,54 +202,57 @@
 
     html += renderLinkTypesLegend();
 
+    html += '<div class="arch-tabs">';
+    html += '<div class="arch-tab-bar" id="arch-tab-bar">';
     arch.links.forEach(function (link, li) {
-      html += renderLinkCard(link, li);
+      var label = tabLabels[li] || link.name;
+      var activeClass = li === activeArchTab ? ' active' : '';
+      html += '<button class="arch-tab-btn' + activeClass + '" data-tab="' + li + '"';
+      html += ' style="--tab-color:' + (link.color || '#4fc3f7') + '">';
+      html += '<span class="arch-tab-dot" style="background:' + (link.color || '#4fc3f7') + '"></span>';
+      html += escapeHtml(label);
+      html += '</button>';
     });
+    html += '</div>';
+
+    arch.links.forEach(function (link, li) {
+      var display = li === activeArchTab ? '' : 'display:none';
+      html += '<div class="arch-tab-panel" id="arch-tab-panel-' + li + '" style="' + display + '">';
+      html += renderLinkTabContent(link, li);
+      html += '</div>';
+    });
+    html += '</div>';
 
     content.innerHTML = html;
 
-    arch.links.forEach(function (link, li) {
-      var card = document.getElementById('link-card-' + li);
-      if (!card) return;
-      card.querySelector('.link-card-header').addEventListener('click', function () {
-        toggleLinkCard(li);
-      });
+    document.getElementById('arch-tab-bar').addEventListener('click', function (e) {
+      var btn = e.target.closest('.arch-tab-btn');
+      if (!btn) return;
+      var tabIdx = parseInt(btn.getAttribute('data-tab'), 10);
+      switchArchTab(tabIdx);
     });
+
+    renderMermaidElements();
   }
 
-  function renderLinkCard(link, index) {
+  function renderLinkTabContent(link, index) {
     var html = '';
-    html += '<div class="link-card" id="link-card-' + index + '">';
-
-    html += '<div class="link-card-header" role="button" tabindex="0">';
-    html += '<span class="link-card-toggle">▶</span>';
-    html += '<span class="link-card-color" style="background:' + (link.color || '#4fc3f7') + '"></span>';
-    html += '<div class="link-card-title">' + escapeHtml(link.name) + '</div>';
-    html += '<div class="link-card-desc">' + escapeHtml(link.description) + '</div>';
+    html += '<div class="link-tab-header">';
+    html += '<div class="link-tab-title">' + escapeHtml(link.name) + '</div>';
+    html += '<div class="link-tab-desc">' + escapeHtml(link.description) + '</div>';
     html += '</div>';
 
-    html += '<div class="link-card-body" style="display:none">';
-
     var mermaidId = 'link-mermaid-' + index;
-    var asciiId = 'link-ascii-' + index;
 
     html += '<div class="link-body-layout">';
 
-    // 左栏：流程图
     html += '<div class="link-body-left">';
-    html += '<div class="view-toggle" data-flow="' + index + '">';
-    html += '<button class="active" data-view="mermaid">Mermaid</button>';
-    html += '<button data-view="ascii">ASCII</button>';
-    html += '</div>';
     html += '<div id="' + mermaidId + '" class="diagram-container">';
+    html += '<button class="diagram-zoom-btn" onclick="APP.zoomDiagram(' + index + ')" title="全屏查看">⛶</button>';
     html += '<div class="mermaid">' + link.mermaid + '</div>';
-    html += '</div>';
-    html += '<div id="' + asciiId + '" class="ascii-container" style="display:none">';
-    html += '<pre>' + escapeHtml(link.ascii) + '</pre>';
     html += '</div>';
     html += '</div>';
 
-    // 右栏：节点列表
     html += '<div class="link-body-right">';
     html += '<h4 class="link-nodes-title">处理节点详情（点击查看完整信息）</h4>';
     html += '<div class="node-list">';
@@ -285,14 +266,16 @@
     html += '</div>';
     html += '</div>';
 
-    html += '</div>'; // end link-body-layout
+    html += '</div>';
 
-    // 全宽区域：MQTT任务清单 / 上行处理器清单 / 说明注释
-    if (link.id === 'link_downstream' || link.id === 'wkwx_link_downstream') {
+    if (link.id === 'link_downstream') {
       html += renderMqttTaskCategories();
     }
-    if (link.id === 'wkwx_link_upstream' || link.id === 'wkwx_link_front_push' || link.id === 'wkwx_link_http_upload') {
-      html += renderUpstreamCategories(link.id);
+    if (link.id === 'link_upstream') {
+      html += renderUpstreamCategories();
+    }
+    if (link.id === 'link_front_down') {
+      html += renderFrontCmdCategories();
     }
     if (link.taskListNote) {
       html += '<div class="link-task-note">';
@@ -301,32 +284,48 @@
       html += '</div>';
     }
 
-    html += '</div>';
-    html += '</div>';
     return html;
   }
 
-  function toggleLinkCard(index) {
-    var card = document.getElementById('link-card-' + index);
-    if (!card) return;
-    var body = card.querySelector('.link-card-body');
-    var toggle = card.querySelector('.link-card-toggle');
-    var isOpen = body.style.display !== 'none';
+  function switchArchTab(index) {
+    activeArchTab = index;
+    var arch = DATA.architecture;
+    document.querySelectorAll('.arch-tab-btn').forEach(function (btn, i) {
+      btn.classList.toggle('active', i === index);
+    });
+    arch.links.forEach(function (link, li) {
+      var panel = document.getElementById('arch-tab-panel-' + li);
+      if (panel) panel.style.display = li === index ? '' : 'none';
+    });
+    renderMermaidElements();
+  }
 
-    if (isOpen) {
-      body.style.display = 'none';
-      toggle.textContent = '▶';
-      card.classList.remove('expanded');
-    } else {
-      body.style.display = '';
-      toggle.textContent = '▼';
-      card.classList.add('expanded');
+  function zoomDiagram(linkIndex) {
+    var arch = DATA.architecture;
+    var link = arch.links[linkIndex];
+    if (!link) return;
 
-      var mermaidId = 'link-mermaid-' + index;
-      var asciiId = 'link-ascii-' + index;
-      bindViewToggle(mermaidId, asciiId);
-      renderMermaidElements();
-    }
+    var overlay = document.getElementById('diagram-zoom-overlay');
+    var container = document.getElementById('diagram-zoom-content');
+    container.innerHTML = '<div class="mermaid">' + link.mermaid + '</div>';
+    overlay.classList.add('visible');
+    renderMermaidElements();
+  }
+
+  function zoomFlowDiagram(mermaidContainerId) {
+    var container = document.getElementById(mermaidContainerId);
+    if (!container) return;
+    var mermaidEl = container.querySelector('.mermaid');
+    if (!mermaidEl) return;
+
+    var overlay = document.getElementById('diagram-zoom-overlay');
+    var zoomContent = document.getElementById('diagram-zoom-content');
+    zoomContent.innerHTML = mermaidEl.innerHTML;
+    overlay.classList.add('visible');
+  }
+
+  function closeDiagramZoom() {
+    document.getElementById('diagram-zoom-overlay').classList.remove('visible');
   }
 
   // ================================================================
@@ -334,46 +333,58 @@
   // ================================================================
 
   function renderMqttTaskCategories() {
-    var cats = getMqttTaskCategories();
+    var cats = DATA.mqttTaskCategories || [];
     if (!cats || cats.length === 0) return '';
 
-    var isWkwx = currentPlatform === 'wkwx';
+    var totalCount = countAllTasks(cats);
+    var implCount = 0;
+    var definedCount = 0;
+    cats.forEach(function (c) {
+      c.items.forEach(function (it) {
+        if (it.status === 'implemented') implCount++;
+        else definedCount++;
+      });
+    });
+
     var html = '';
     html += '<div class="mqtt-task-section">';
     html += '<h3 class="mqtt-task-title">MQTT 任务类型清单</h3>';
-    html += '<p class="mqtt-task-subtitle">云端下发的全部任务类型（共 ' + countAllTasks(cats) + ' 种），点击大类展开查看</p>';
+    html += '<p class="mqtt-task-subtitle">云端下发的全部任务类型（共 ' + totalCount + ' 种：<span class="status-badge status-impl">已实现 ' + implCount + '</span> <span class="status-badge status-defined">仅定义 ' + definedCount + '</span>），点击大类展开查看</p>';
     html += '<div class="mqtt-dir-note">';
-    if (isWkwx) {
-      html += '<strong>处理器目录说明：</strong>';
-      html += '<code>task-mqtt/wkwx/</code> — 企业微信处理器（25个，注册至 WorkWxConvertServiceList，由 mqttClientBase.js runTask() 中 registry.workWx=true 分支遍历调用）';
-    } else {
-      html += '<strong>处理器目录说明：</strong>';
-      html += '<code>task-mqtt/wx/</code> — 个人微信处理器（16个，均已注册至 WxConvertServiceList）；';
-      html += '<code>task-mqtt/wkwx/</code> — 企业微信处理器（注册至 WorkWxConvertServiceList，独立管理）；';
-      html += '<code>task-mqtt/</code> 根目录含 <code>mqttChangeRemarkWx4Service.js</code>，状态待确认。';
-    }
+    html += '<strong>处理器目录说明：</strong>';
+    html += '<code>task-mqtt/</code> — 微信处理器（17个，注册至 WxConvertServiceList）；';
+    html += '<code>task-mqtt/wkwx/</code> — 企微处理器（25个，注册至 WorkWxConvertServiceList）。';
+    html += '<br/><strong>状态说明：</strong>';
+    html += '<span class="status-badge status-impl">已实现</span> = 有专用处理器文件；';
+    html += '<span class="status-badge status-defined">仅定义</span> = 仅在 galaxyTaskType.js 中定义常量，客户端无专用业务逻辑（通过通用管道转发到逆向）。';
     html += '</div>';
 
     cats.forEach(function (cat, ci) {
+      var catImplCount = 0;
+      cat.items.forEach(function (it) { if (it.status === 'implemented') catImplCount++; });
       html += '<div class="mqtt-cat" id="mqtt-cat-' + ci + '">';
       html += '<div class="mqtt-cat-header" role="button" tabindex="0" onclick="APP.toggleMqttCat(' + ci + ')">';
       html += '<span class="mqtt-cat-toggle">▶</span>';
       html += '<span class="mqtt-cat-name">' + escapeHtml(cat.name) + '</span>';
       html += '<span class="mqtt-cat-range">' + escapeHtml(cat.typeRange) + '</span>';
-      html += '<span class="mqtt-cat-count">' + cat.items.length + ' 种</span>';
+      html += '<span class="mqtt-cat-count">' + cat.items.length + ' 种 (' + catImplCount + ' 已实现)</span>';
       html += '</div>';
 
       html += '<div class="mqtt-cat-body" style="display:none">';
       html += '<table class="mqtt-task-table">';
       html += '<thead><tr>';
-      html += '<th>Type</th><th>名称</th><th>处理器</th><th>详情</th>';
+      html += '<th>Type</th><th>名称</th><th>平台</th><th>微信处理器</th><th>企微处理器</th><th>状态</th><th>详情</th>';
       html += '</tr></thead>';
       html += '<tbody>';
       cat.items.forEach(function (item) {
-        html += '<tr>';
+        var rowClass = item.status === 'defined-only' ? ' class="row-defined-only"' : '';
+        html += '<tr' + rowClass + '>';
         html += '<td class="mqtt-type-code">' + item.type + '</td>';
         html += '<td>' + escapeHtml(item.name) + '</td>';
+        html += '<td>' + renderPlatformBadge(item.platform) + '</td>';
         html += '<td class="mqtt-handler">' + escapeHtml(item.handler) + '</td>';
+        html += '<td class="mqtt-handler">' + (item.wkHandler ? escapeHtml(item.wkHandler) : '<span class="text-muted">—</span>') + '</td>';
+        html += '<td>' + renderStatusBadge(item.status) + '</td>';
         html += '<td>';
         if (item.scenarioId) {
           html += '<a class="mqtt-link" href="#scenario/' + item.scenarioId + '" onclick="APP.navigateTo(\'' + item.scenarioId + '\');return false;">查看链路 →</a>';
@@ -392,70 +403,22 @@
     return html;
   }
 
-  function renderUpstreamCategories(linkId) {
-    var allCats = getUpstreamCategories();
-    if (!allCats || allCats.length === 0) return '';
-
-    var filterMap = {
-      'wkwx_link_upstream': ['wkwx_common_service', 'wkwx_convert_service', 'wkwx_convert_response'],
-      'wkwx_link_front_push': ['wkwx_front_strategy'],
-      'wkwx_link_http_upload': ['wkwx_http_endpoints'],
-    };
-    var allowedIds = filterMap[linkId] || [];
-    var cats = allCats.filter(function (c) { return allowedIds.indexOf(c.id) !== -1; });
-    if (cats.length === 0) return '';
-
-    var titleMap = {
-      'wkwx_link_upstream': '上行消息处理器清单（WorkWxConvertServiceList）',
-      'wkwx_link_front_push': '企微前端推送策略清单（SendMsg2FrontStrategyList）',
-      'wkwx_link_http_upload': '企微 HTTP 上报端点清单',
-    };
-
-    var html = '';
-    html += '<div class="mqtt-task-section">';
-    html += '<h3 class="mqtt-task-title">' + (titleMap[linkId] || '处理器清单') + '</h3>';
-    html += '<p class="mqtt-task-subtitle">共 ' + countAllTasks(cats) + ' 个处理器，点击大类展开查看</p>';
-
-    cats.forEach(function (cat, ci) {
-      var catIdx = 'upstream-cat-' + linkId + '-' + ci;
-      html += '<div class="mqtt-cat" id="' + catIdx + '">';
-      html += '<div class="mqtt-cat-header" role="button" tabindex="0" onclick="APP.toggleUpstreamCat(\'' + catIdx + '\')">';
-      html += '<span class="mqtt-cat-toggle">▶</span>';
-      html += '<span class="mqtt-cat-name">' + escapeHtml(cat.name) + '</span>';
-      html += '<span class="mqtt-cat-range">' + escapeHtml(cat.typeRange) + '</span>';
-      html += '<span class="mqtt-cat-count">' + cat.items.length + ' 个</span>';
-      html += '</div>';
-
-      html += '<div class="mqtt-cat-body" style="display:none">';
-      html += '<table class="mqtt-task-table">';
-      html += '<thead><tr>';
-      html += '<th>Type / 触发条件</th><th>名称</th><th>处理器文件</th>';
-      html += '</tr></thead>';
-      html += '<tbody>';
-      cat.items.forEach(function (item) {
-        html += '<tr>';
-        html += '<td class="mqtt-type-code">' + escapeHtml(String(item.type)) + '</td>';
-        html += '<td>' + escapeHtml(item.name) + '</td>';
-        html += '<td class="mqtt-handler">' + escapeHtml(item.handler) + '</td>';
-        html += '</tr>';
-      });
-      html += '</tbody></table>';
-      html += '</div>';
-      html += '</div>';
-    });
-
-    html += '</div>';
-    return html;
+  function renderPlatformBadge(platform) {
+    if (!platform) return '';
+    var cls = 'platform-badge';
+    if (platform === '微信') cls += ' platform-wx';
+    else if (platform === '企微') cls += ' platform-wk';
+    else cls += ' platform-shared';
+    return '<span class="' + cls + '">' + escapeHtml(platform) + '</span>';
   }
 
-  function toggleUpstreamCat(catId) {
-    var el = document.getElementById(catId);
-    if (!el) return;
-    var body = el.querySelector('.mqtt-cat-body');
-    var toggle = el.querySelector('.mqtt-cat-toggle');
-    var isOpen = body.style.display !== 'none';
-    body.style.display = isOpen ? 'none' : '';
-    toggle.textContent = isOpen ? '▶' : '▼';
+  function renderStatusBadge(status) {
+    if (status === 'implemented') {
+      return '<span class="status-badge status-impl">已实现</span>';
+    } else if (status === 'defined-only') {
+      return '<span class="status-badge status-defined">仅定义</span>';
+    }
+    return escapeHtml(status || '');
   }
 
   function countAllTasks(cats) {
@@ -474,16 +437,146 @@
     toggle.textContent = isOpen ? '▶' : '▼';
   }
 
-  function updateHeaderBadges() {
-    var versionBadge = document.querySelector('.badge-version');
-    var noteBadge = document.querySelector('.badge-note');
-    if (currentPlatform === 'wkwx') {
-      if (versionBadge) versionBadge.textContent = '企业微信';
-      if (noteBadge) noteBadge.textContent = '仅企业微信';
-    } else {
-      if (versionBadge) versionBadge.textContent = '微信 4.0';
-      if (noteBadge) noteBadge.textContent = '仅个人微信';
-    }
+  // ================================================================
+  //  上行处理器清单（链路②）
+  // ================================================================
+
+  function renderUpstreamCategories() {
+    var cats = DATA.upstreamCategories || [];
+    if (!cats || cats.length === 0) return '';
+
+    var totalItems = 0;
+    cats.forEach(function (c) { totalItems += c.items.length; });
+
+    var html = '';
+    html += '<div class="mqtt-task-section">';
+    html += '<h3 class="mqtt-task-title">上行处理器清单</h3>';
+    html += '<p class="mqtt-task-subtitle">逆向回报的被动事件和主动任务回执处理器（共 ' + totalItems + ' 个），点击大类展开查看</p>';
+
+    cats.forEach(function (cat, ci) {
+      var catId = 'upstream-cat-' + ci;
+      html += '<div class="mqtt-cat" id="' + catId + '">';
+      html += '<div class="mqtt-cat-header" role="button" tabindex="0" onclick="APP.toggleUpstreamCat(' + ci + ')">';
+      html += '<span class="mqtt-cat-toggle">▶</span>';
+      html += '<span class="mqtt-cat-name">' + escapeHtml(cat.name) + '</span>';
+      html += '<span class="mqtt-cat-count">' + cat.items.length + ' 个</span>';
+      html += '</div>';
+
+      html += '<div class="mqtt-cat-body" style="display:none">';
+      html += '<p class="upstream-cat-desc">' + escapeHtml(cat.description) + '</p>';
+      html += '<table class="mqtt-task-table upstream-table">';
+      html += '<thead><tr>';
+      html += '<th>名称</th><th>处理器</th><th>平台</th><th>功能说明</th>';
+      html += '</tr></thead>';
+      html += '<tbody>';
+      cat.items.forEach(function (item) {
+        var rowClass = item.deprecated ? ' class="row-defined-only"' : '';
+        html += '<tr' + rowClass + '>';
+        html += '<td class="upstream-name">' + escapeHtml(item.name) + '</td>';
+        html += '<td class="mqtt-handler" title="过滤条件: ' + escapeHtml(item.filterType || '-') + '">' + escapeHtml(item.handler);
+        if (item.httpUpload) {
+          html += '<br><span class="upstream-http-tag" title="' + escapeHtml(item.httpUpload) + '">HTTP ↑</span>';
+        }
+        html += '</td>';
+        html += '<td>' + renderPlatformBadge(item.platform) + '</td>';
+        html += '<td class="upstream-desc">' + escapeHtml(item.desc || '-') + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      html += '</div>';
+      html += '</div>';
+    });
+
+    html += '</div>';
+    return html;
+  }
+
+  function toggleUpstreamCat(index) {
+    var el = document.getElementById('upstream-cat-' + index);
+    if (!el) return;
+    var body = el.querySelector('.mqtt-cat-body');
+    var toggle = el.querySelector('.mqtt-cat-toggle');
+    var isOpen = body.style.display !== 'none';
+    body.style.display = isOpen ? 'none' : '';
+    toggle.textContent = isOpen ? '▶' : '▼';
+  }
+
+  // ================================================================
+  //  前端指令清单（链路③）
+  // ================================================================
+
+  function renderFrontCmdCategories() {
+    var cmds = DATA.frontCmdCategories || [];
+    if (!cmds || cmds.length === 0) return '';
+
+    var html = '';
+    html += '<div class="mqtt-task-section">';
+    html += '<h3 class="mqtt-task-title">前端指令清单 (frontFlowInBound)</h3>';
+    html += '<p class="mqtt-task-subtitle">前端通过 WebSocket 下发的全部指令类型（共 ' + cmds.length + ' 种），点击展开查看详细处理逻辑</p>';
+
+    cmds.forEach(function (cmd, ci) {
+      var catId = 'front-cmd-' + ci;
+      html += '<div class="mqtt-cat" id="' + catId + '">';
+      html += '<div class="mqtt-cat-header" role="button" tabindex="0" onclick="APP.toggleFrontCmd(' + ci + ')">';
+      html += '<span class="mqtt-cat-toggle">▶</span>';
+      html += '<span class="mqtt-cat-name">' + escapeHtml(cmd.name) + '</span>';
+      html += renderPlatformBadge(cmd.platform);
+      if (cmd.branches && cmd.branches.length > 0) {
+        html += '<span class="mqtt-cat-count">' + cmd.branches.length + ' 个分支</span>';
+      }
+      html += '</div>';
+
+      html += '<div class="mqtt-cat-body" style="display:none">';
+      html += '<div class="front-cmd-info">';
+      html += '<div class="front-cmd-handler"><strong>处理器：</strong><code>' + escapeHtml(cmd.handler) + '</code></div>';
+      html += '<div class="front-cmd-desc">' + escapeHtml(cmd.description) + '</div>';
+      html += '</div>';
+
+      if (cmd.branches && cmd.branches.length > 0) {
+        html += '<div class="front-cmd-branches">';
+        cmd.branches.forEach(function (branch, bi) {
+          var branchId = catId + '-branch-' + bi;
+          html += '<div class="front-branch" id="' + branchId + '">';
+          html += '<div class="front-branch-header" role="button" tabindex="0" onclick="APP.toggleFrontBranch(\'' + branchId + '\')">';
+          html += '<span class="mqtt-cat-toggle">▶</span>';
+          html += '<span class="front-branch-type">' + escapeHtml(branch.type) + '</span>';
+          html += '<span class="front-branch-name">' + escapeHtml(branch.name) + '</span>';
+          html += renderPlatformBadge(branch.platform);
+          html += '</div>';
+          html += '<div class="front-branch-body" style="display:none">';
+          html += '<pre class="front-branch-detail">' + escapeHtml(branch.detail) + '</pre>';
+          html += '</div>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      html += '</div>';
+      html += '</div>';
+    });
+
+    html += '</div>';
+    return html;
+  }
+
+  function toggleFrontCmd(index) {
+    var el = document.getElementById('front-cmd-' + index);
+    if (!el) return;
+    var body = el.querySelector('.mqtt-cat-body');
+    var toggle = el.querySelector('.mqtt-cat-toggle');
+    var isOpen = body.style.display !== 'none';
+    body.style.display = isOpen ? 'none' : '';
+    toggle.textContent = isOpen ? '▶' : '▼';
+  }
+
+  function toggleFrontBranch(branchId) {
+    var el = document.getElementById(branchId);
+    if (!el) return;
+    var body = el.querySelector('.front-branch-body');
+    var toggle = el.querySelector('.mqtt-cat-toggle');
+    var isOpen = body.style.display !== 'none';
+    body.style.display = isOpen ? 'none' : '';
+    toggle.textContent = isOpen ? '▶' : '▼';
   }
 
   function renderLinkTypesLegend() {
@@ -569,8 +662,7 @@
   // ================================================================
 
   function showScenario(id) {
-    var scenarios = getScenarios();
-    var scenario = scenarios.find(function (s) { return s.id === id; });
+    var scenario = DATA.scenarios.find(function (s) { return s.id === id; });
     if (!scenario) return;
 
     nodeRegistry = [];
@@ -613,13 +705,6 @@
     }
 
     content.innerHTML = html;
-
-    content.querySelectorAll('.view-toggle').forEach(function (toggle) {
-      var fIdx = toggle.getAttribute('data-flow');
-      var mermaidId = 'flow-mermaid-' + scenario.id + '-' + fIdx;
-      var asciiId = 'flow-ascii-' + scenario.id + '-' + fIdx;
-      bindViewToggle(mermaidId, asciiId);
-    });
 
     renderMermaidElements();
   }
@@ -686,19 +771,11 @@
     html += '</div>';
 
     var mermaidId = 'flow-mermaid-' + scenarioId + '-' + flowIndex;
-    var asciiId = 'flow-ascii-' + scenarioId + '-' + flowIndex;
 
-    html += '<div class="view-toggle" data-flow="' + flowIndex + '">';
-    html += '<button class="active" data-view="mermaid">Mermaid</button>';
-    html += '<button data-view="ascii">ASCII</button>';
-    html += '</div>';
-
+    var flowMermaidCode = generateMermaidCode(flow);
     html += '<div id="' + mermaidId + '" class="diagram-container">';
-    html += '<div class="mermaid">' + generateMermaidCode(flow) + '</div>';
-    html += '</div>';
-
-    html += '<div id="' + asciiId + '" class="ascii-container" style="display:none">';
-    html += '<pre>' + escapeHtml(generateAsciiDiagram(flow)) + '</pre>';
+    html += '<button class="diagram-zoom-btn" onclick="APP.zoomFlowDiagram(\'' + mermaidId + '\')" title="全屏查看">⛶</button>';
+    html += '<div class="mermaid">' + flowMermaidCode + '</div>';
     html += '</div>';
 
     html += '<h4 style="font-size:14px;color:var(--text-muted);margin:16px 0 8px;font-weight:600">处理节点详情（点击查看完整信息）</h4>';
@@ -780,38 +857,6 @@
     return str.replace(/"/g, "'").replace(/[[\]{}()]/g, ' ').replace(/</g, '').replace(/>/g, '');
   }
 
-  function generateAsciiDiagram(flow) {
-    var lines = [];
-    var maxLen = 0;
-
-    flow.steps.forEach(function (step) {
-      var len = step.name.length + shortFile(step.file).length + 5;
-      if (len > maxLen) maxLen = len;
-    });
-
-    var boxW = Math.max(maxLen, 50);
-
-    flow.steps.forEach(function (step, i) {
-      var name = step.name;
-      var file = shortFile(step.file);
-      var func = step.func;
-
-      lines.push('┌' + repeat('─', boxW) + '┐');
-      lines.push('│ ' + padRight(name, boxW - 2) + ' │');
-      lines.push('│ ' + padRight('文件: ' + file, boxW - 2) + ' │');
-      lines.push('│ ' + padRight('函数: ' + func, boxW - 2) + ' │');
-      lines.push('└' + repeat('─', boxW) + '┘');
-
-      if (step.arrow && i < flow.steps.length - 1) {
-        var arrowText = '↓ ' + step.arrow;
-        var pad = Math.floor((boxW - arrowText.length) / 2);
-        lines.push(repeat(' ', Math.max(pad, 2)) + arrowText);
-      }
-    });
-
-    return lines.join('\n');
-  }
-
   // ================================================================
   //  详情面板
   // ================================================================
@@ -877,6 +922,12 @@
   }
 
   function renderDetailBlock(title, content, mono) {
+    if (typeof content === 'object' && content !== null && !Array.isArray(content)) {
+      return renderStructuredDetail(title, content);
+    }
+    if (Array.isArray(content)) {
+      return renderLayeredDetail(title, content);
+    }
     var html = '<div class="detail-block">';
     html += '<div class="detail-block-title">' + title + '</div>';
     html += '<div class="detail-block-content' + (mono ? ' mono' : '') + '">' + escapeHtml(content) + '</div>';
@@ -884,34 +935,74 @@
     return html;
   }
 
-  // ================================================================
-  //  视图切换
-  // ================================================================
+  function renderStructuredDetail(title, obj) {
+    var html = '<div class="detail-block">';
+    html += '<div class="detail-block-title">' + escapeHtml(title) + '</div>';
+    html += '<div class="detail-structured">';
+    Object.keys(obj).forEach(function (key) {
+      var val = obj[key];
+      html += '<div class="detail-struct-item">';
+      html += '<div class="detail-struct-key">' + escapeHtml(key) + '</div>';
+      if (typeof val === 'string') {
+        html += '<pre class="detail-struct-val">' + escapeHtml(val) + '</pre>';
+      } else if (Array.isArray(val)) {
+        html += renderLayeredDetail('', val);
+      } else if (typeof val === 'object' && val !== null) {
+        html += renderStructuredDetail('', val);
+      }
+      html += '</div>';
+    });
+    html += '</div></div>';
+    return html;
+  }
 
-  function bindViewToggle(mermaidId, asciiId) {
-    var mermaidEl = document.getElementById(mermaidId);
-    var asciiEl = document.getElementById(asciiId);
-    if (!mermaidEl || !asciiEl) return;
-
-    var toggle = mermaidEl.previousElementSibling;
-    if (!toggle || !toggle.classList.contains('view-toggle')) return;
-
-    toggle.addEventListener('click', function (e) {
-      var btn = e.target.closest('button');
-      if (!btn) return;
-      var view = btn.getAttribute('data-view');
-
-      toggle.querySelectorAll('button').forEach(function (b) { b.classList.remove('active'); });
-      btn.classList.add('active');
-
-      if (view === 'mermaid') {
-        mermaidEl.style.display = '';
-        asciiEl.style.display = 'none';
-      } else {
-        mermaidEl.style.display = 'none';
-        asciiEl.style.display = '';
+  function renderLayeredDetail(title, arr) {
+    var html = '<div class="detail-block">';
+    if (title) html += '<div class="detail-block-title">' + escapeHtml(title) + '</div>';
+    html += '<div class="detail-layers">';
+    arr.forEach(function (layer, i) {
+      if (typeof layer === 'string') {
+        html += '<pre class="detail-layer-text">' + escapeHtml(layer) + '</pre>';
+      } else if (typeof layer === 'object' && layer !== null) {
+        html += '<div class="detail-layer-obj">';
+        if (layer.title) {
+          html += '<div class="detail-layer-title">' + escapeHtml(layer.title) + '</div>';
+        }
+        if (layer.content) {
+          html += '<pre class="detail-layer-content">' + escapeHtml(layer.content) + '</pre>';
+        }
+        if (layer.table) {
+          html += renderSimpleTable(layer.table);
+        }
+        if (layer.items) {
+          layer.items.forEach(function (item) {
+            html += '<pre class="detail-layer-content">' + escapeHtml(item) + '</pre>';
+          });
+        }
+        html += '</div>';
       }
     });
+    html += '</div></div>';
+    return html;
+  }
+
+  function renderSimpleTable(tableData) {
+    if (!tableData || !tableData.headers || !tableData.rows) return '';
+    var html = '<table class="detail-table">';
+    html += '<thead><tr>';
+    tableData.headers.forEach(function (h) {
+      html += '<th>' + escapeHtml(h) + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+    tableData.rows.forEach(function (row) {
+      html += '<tr>';
+      row.forEach(function (cell) {
+        html += '<td>' + escapeHtml(cell) + '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    return html;
   }
 
   // ================================================================
@@ -1005,27 +1096,6 @@
     return parts.slice(-2).join('/');
   }
 
-  function padRight(str, len) {
-    var s = str || '';
-    var cLen = getStringWidth(s);
-    if (cLen >= len) return s;
-    return s + repeat(' ', len - cLen);
-  }
-
-  function getStringWidth(str) {
-    var w = 0;
-    for (var i = 0; i < str.length; i++) {
-      var c = str.charCodeAt(i);
-      w += (c > 0x7f) ? 2 : 1;
-    }
-    return w;
-  }
-
-  function repeat(ch, n) {
-    if (n <= 0) return '';
-    return new Array(n + 1).join(ch);
-  }
-
   function getDirectionLabel(dir) {
     var map = {
       'downstream': '↓ 下行',
@@ -1043,6 +1113,10 @@
     navigateTo: function (scenarioId) { selectView(scenarioId); },
     toggleMqttCat: toggleMqttCat,
     toggleUpstreamCat: toggleUpstreamCat,
+    toggleFrontCmd: toggleFrontCmd,
+    toggleFrontBranch: toggleFrontBranch,
+    zoomDiagram: zoomDiagram,
+    zoomFlowDiagram: zoomFlowDiagram,
     copyText: copyText,
   };
 })();

@@ -3,21 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Galaxy Client 数据链路分析 — 微信4.0</title>
+  <title>Galaxy Client 数据链路分析 — 微信4.0 / 企业微信</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="header">
     <div class="header-left">
       <h1 class="header-title">Galaxy Client 数据链路分析</h1>
-      <span class="badge badge-version">微信 4.0</span>
-      <span class="badge badge-note">仅个人微信</span>
+      <span class="badge badge-version">微信 4.0 / 企业微信</span>
     </div>
     <div class="header-right">
-      <div class="platform-toggle" id="platform-toggle">
-        <button class="platform-btn active" data-platform="wx">微信</button>
-        <button class="platform-btn" data-platform="wkwx">企业微信</button>
-      </div>
       <input type="text" id="search-input" class="search-input" placeholder="搜索场景、标签...">
     </div>
   </header>
@@ -49,13 +44,15 @@
     </div>
   </div>
 
+  <div class="diagram-zoom-overlay" id="diagram-zoom-overlay">
+    <div class="diagram-zoom-panel">
+      <button class="detail-close" id="diagram-zoom-close">&times;</button>
+      <div class="diagram-zoom-content" id="diagram-zoom-content"></div>
+    </div>
+  </div>
+
   <script src="mermaid.min.js"></script>
   <script src="data.js"></script>
-  <script src="data-wkwx-1.js"></script>
-  <script src="data-wkwx-2.js"></script>
-  <script src="data-wkwx-3.js"></script>
-  <script src="data-wkwx-4.js"></script>
-  <script src="data-wkwx-init.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
